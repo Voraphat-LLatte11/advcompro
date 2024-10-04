@@ -28,6 +28,8 @@
     "react": "^18",
     "react-dom": "^18",
     "sweetalert2": "^11.12.4",
-    "zustand": "^4.5.4"
+    "zustand": "^4.5.4",
+    "react-chartjs-2": "^4.0.0",
+    "chart.js": "^3.0.0"
   }
 }

@@ -1,19 +1,15 @@
-import Head from "next/head";
-import Image from "next/image";
-import { Inter } from "next/font/google";
-import Grid from "@mui/material/Grid2";
-import { Box, Typography, Button, TextField } from "@mui/material"; // Use by LoginForm
-import useBearStore from "@/store/useBearStore";
+// pages/index.js
+import { Button, Box, Typography } from '@mui/material';
+import { useRouter } from 'next/router';
 
-function Home() {
+export default function Home() {
+  const router = useRouter();
   return (
-    <>
-
-      <main>
-        <Box>This is index page</Box>
-      </main>
-    </>
+    <Box sx={{ textAlign: 'center', marginTop: '20vh' }}>
+      <Typography variant="h4">Welcome to Product Comparison</Typography>
+      <Button variant="contained" onClick={() => router.push('/signin')}>
+        Start
+      </Button>
+    </Box>
   );
 }
-
-export default Home;

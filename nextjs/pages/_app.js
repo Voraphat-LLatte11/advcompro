@@ -31,10 +31,25 @@ export default function App({ Component, pageProps, props }) {
   React.useEffect(() => {
     console.log("App load", pageName, router.query);
     setLoading(true);
-    // TODO: This section is use to handle page change.
-    setAppName("Say Hi")
+    setAppName("Prodogo");
     setLoading(false);
   }, [router, pageName]);
+
+  // Listen for route changes to show/hide loader
+  React.useEffect(() => {
+    const handleStart = () => setLoading(true);
+    const handleComplete = () => setLoading(false);
+
+    router.events.on("routeChangeStart", handleStart);
+    router.events.on("routeChangeComplete", handleComplete);
+    router.events.on("routeChangeError", handleComplete);
+
+    return () => {
+      router.events.off("routeChangeStart", handleStart);
+      router.events.off("routeChangeComplete", handleComplete);
+      router.events.off("routeChangeError", handleComplete);
+    };
+  }, [router]);
 
   return (
     <React.Fragment>
@@ -47,9 +62,16 @@ export default function App({ Component, pageProps, props }) {
 
       <AppCacheProvider {...props}>
         <ThemeProvider theme={theme}>
-          <Layout>
-            <Component {...pageProps} />
-          </Layout>
+          {/* Display loading spinner when route changes */}
+          {loading ? (
+            <Backdrop open={loading}>
+              <CircularProgress color="inherit" />
+            </Backdrop>
+          ) : (
+            <Layout>
+              <Component {...pageProps} />
+            </Layout>
+          )}
         </ThemeProvider>
       </AppCacheProvider>
     </React.Fragment>

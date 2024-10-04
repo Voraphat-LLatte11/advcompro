@@ -1,4 +1,4 @@
-# Next.js + FastAPI + PostgreSQL Starter Project
+# Next.js + FastAPI + PostgreSQL Project
 
 This project is a Next.js application containerized with Docker. It uses Docker Compose to simplify development and dependency management, including building and running the application. The project also integrates **Material UI** for creating a responsive and sleek user interface.
 

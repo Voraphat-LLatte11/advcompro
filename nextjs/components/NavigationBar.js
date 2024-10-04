@@ -9,11 +9,11 @@ import {
   Box,
   ListItemIcon,
 } from "@mui/material";
+import SvgIcon from '@mui/material/SvgIcon'
 import { useRouter } from "next/router";
 import Link from "next/link";
-import FunctionsIcon from "@mui/icons-material/Functions";
 import Divider from "@mui/material/Divider";
-import PersonIcon from "@mui/icons-material/Person";
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import useBearStore from "@/store/useBearStore";
 
 const NavigationLayout = ({ children }) => {
@@ -22,30 +22,34 @@ const NavigationLayout = ({ children }) => {
 
   return (
     <>
-      <AppBar position="sticky" sx={{ backgroundColor: "#ff5e15" }}>
+      <AppBar position="sticky" sx={{ backgroundColor: "#d6e7f9" }}>
         <Toolbar>
+
           <Link href={"/"}>
-            <FunctionsIcon sx={{ color: "#ffffff" }} fontSize="large" />
+            <img src={'https://i.postimg.cc/x13gF3Dk/prodogo2.png'} alt="Logo" width="30" height="30"/>
           </Link>
+          
           <Typography
             variant="body1"
             sx={{
               fontSize: "22px",
               fontWeight: 500,
-              color: "#ffffff",
+              color: "#053871",
               padding: "0 10px",
               fontFamily: "Prompt",
             }}>
             {appName}
-          </Typography>
-          <NavigationLink href="/page1" label="Page1" />
+          </Typography> 
+
+          <NavigationLink href="/dashboard" label="Dashboard" />
           <div style={{ flexGrow: 1 }} />
+
           <Button
-            color="#ffffff"
+            color="#053871"
             onClick={() => {
-              router.push("/page2");
+              router.push("/register");
             }}>
-            <PersonIcon />
+            <PersonOutlineIcon sx={{ color: "#053871" }} />
           </Button>
         </Toolbar>
       </AppBar>
@@ -63,7 +67,7 @@ const NavigationLink = ({ href, label }) => {
           fontSize: "14px",
           fontWeight: 500,
           // textTransform: "uppercase",
-          color: "#fff",
+          color: "#053871",
           padding: "0 10px", // Add padding on left and right
         }}>
         {label}
