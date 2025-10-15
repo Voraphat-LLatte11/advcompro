@@ -1,75 +1,126 @@
 import * as React from "react";
 import {
-  AppBar,
-  Toolbar,
-  Typography,
-  Button,
-  Menu,
-  MenuItem,
-  Box,
-  ListItemIcon,
+  AppBar, Toolbar, Typography, Button, Box, IconButton, Avatar, Menu, MenuItem, Divider, ListItemIcon
 } from "@mui/material";
-import { useRouter } from "next/router";
-import Link from "next/link";
-import FunctionsIcon from "@mui/icons-material/Functions";
-import Divider from "@mui/material/Divider";
+import CarRentalIcon from '@mui/icons-material/CarRental';
 import PersonIcon from "@mui/icons-material/Person";
+import DashboardIcon from "@mui/icons-material/Dashboard";
+import LogoutIcon from "@mui/icons-material/Logout";
+import Link from "next/link";
+import { useRouter } from "next/router";
 import useBearStore from "@/store/useBearStore";
 
 const NavigationLayout = ({ children }) => {
   const router = useRouter();
-  const appName = useBearStore((state) => state.appName);
+
+  // ✅ hooks must be called every render (no early returns before these)
+  const { appName, isAuthed, user, logout, _hasHydrated } = useBearStore();
+  const [anchorEl, setAnchorEl] = React.useState(null);
+  const open = Boolean(anchorEl);
+
+  // render flags
+  const showLoggedIn = _hasHydrated && isAuthed;     // only show after hydration
+  const showLoggedOut = _hasHydrated && !isAuthed;
+  const loadingAuth = !_hasHydrated;
 
   return (
     <>
-      <AppBar position="sticky" sx={{ backgroundColor: "#ff5e15" }}>
+      <AppBar position="sticky" sx={{ backgroundColor: "#1f1f1f" }}>
         <Toolbar>
-          <Link href={"/"}>
-            <FunctionsIcon sx={{ color: "#ffffff" }} fontSize="large" />
-          </Link>
+          <Link href="/"><CarRentalIcon sx={{ color: "#fff" }} fontSize="large" /></Link>
           <Typography
-            variant="body1"
+            variant="h6" // you can also try "h5" or "h4"
             sx={{
-              fontSize: "22px",
-              fontWeight: 500,
-              color: "#ffffff",
-              padding: "0 10px",
-              fontFamily: "Prompt",
-            }}>
-            {appName}
+              color: "#fff",
+              px: 1.5,
+              fontWeight: 800,
+              fontSize: "1.8rem", // ← adjust size (1.8rem ≈ 29px)
+              letterSpacing: 1.5,
+              fontFamily: "Roboto, sans-serif",
+            }}
+          >
+          {appName}
           </Typography>
-          <NavigationLink href="/page1" label="Page1" />
-          <div style={{ flexGrow: 1 }} />
-          <Button
-            color="#ffffff"
-            onClick={() => {
-              router.push("/page2");
-            }}>
-            <PersonIcon />
-          </Button>
+
+          <NavLink href="/mainpage" label="Rent the vehicle" />
+          <Box sx={{ flexGrow: 1 }} />
+
+          {/* 🔄 While hydrating, show nothing (or a small placeholder) */}
+          {loadingAuth && <Box sx={{ width: 160, height: 36 }} />}
+
+          {/* BEFORE LOGIN */}
+          {showLoggedOut && (
+            <Box sx={{ display: "flex", gap: 1 }}>
+              <Button
+                variant="outlined"
+                sx={{ color: "#fff", borderColor: "rgba(255,255,255,0.6)" }}
+                onClick={() => router.push("/login")}
+              >
+                Login
+              </Button>
+              <Button
+                variant="contained"
+                sx={{ backgroundColor: "#ff9702", color: "#000", "&:hover": { backgroundColor: "#ffa733" } }}
+                onClick={() => router.push("/register")}
+              >
+                Register
+              </Button>
+            </Box>
+          )}
+
+          {/* AFTER LOGIN */}
+          {showLoggedIn && (
+            <>
+              <Button
+                variant="outlined"
+                sx={{ color: "#fff", borderColor: "rgba(255,255,255,0.6)", mr: 1 }}
+                onClick={() => router.push("/mainpage")}
+              >
+                Dashboard
+              </Button>
+              <IconButton onClick={(e) => setAnchorEl(e.currentTarget)}>
+                <Avatar sx={{ width: 34, height: 34 }}>
+                  {(user?.username?.[0] ?? "U").toUpperCase()}
+                </Avatar>
+              </IconButton>
+              <Menu
+                anchorEl={anchorEl}
+                open={open}
+                onClose={() => setAnchorEl(null)}
+                anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+                transformOrigin={{ vertical: "top", horizontal: "right" }}
+              >
+                <Box sx={{ px: 2, py: 1, minWidth: 200 }}>
+                  <Typography variant="subtitle2">Signed in as</Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {user?.username ?? "User"}
+                  </Typography>
+                </Box>
+                <Divider />
+                <MenuItem onClick={() => { setAnchorEl(null); router.push("/mainpage"); }}>
+                  <ListItemIcon><DashboardIcon fontSize="small" /></ListItemIcon>
+                  Dashboard
+                </MenuItem>
+                <Divider />
+                <MenuItem onClick={() => { setAnchorEl(null); logout(); router.push("/"); }}>
+                  <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
+                  Logout
+                </MenuItem>
+              </Menu>
+            </>
+          )}
         </Toolbar>
       </AppBar>
+
       <main>{children}</main>
     </>
   );
 };
 
-const NavigationLink = ({ href, label }) => {
-  return (
-    <Link href={href} style={{ textDecoration: "none" }}>
-      <Typography
-        variant="body1"
-        sx={{
-          fontSize: "14px",
-          fontWeight: 500,
-          // textTransform: "uppercase",
-          color: "#fff",
-          padding: "0 10px", // Add padding on left and right
-        }}>
-        {label}
-      </Typography>{" "}
-    </Link>
-  );
-};
+const NavLink = ({ href, label }) => (
+  <Link href={href} style={{ textDecoration: "none" }}>
+    <Typography sx={{ color: "#fff", px: 1, fontWeight: 500 }}>{label}</Typography>
+  </Link>
+);
 
 export default NavigationLayout;
