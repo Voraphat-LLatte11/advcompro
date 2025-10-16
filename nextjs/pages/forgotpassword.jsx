@@ -1,4 +1,4 @@
-// pages/login.jsx (or wherever your login page lives)
+// pages/forgotpassword.jsx
 import { useState } from "react";
 import {
   Box,
@@ -12,11 +12,15 @@ import {
 } from "@mui/material";
 import Swal from "sweetalert2";
 import { useRouter } from "next/router";
-import useBearStore from "@/store/useBearStore";
+import NextLink from "next/link";
 
-export default function Login() {
+export default function ForgotPassword() {
   const router = useRouter();
-  const [form, setForm] = useState({ username: "", password: "" });
+  const [form, setForm] = useState({
+    username: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
   const [loading, setLoading] = useState(false);
 
   const handleChange = (e) =>
@@ -24,36 +28,41 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // client-side checks
+    if (!form.username || !form.newPassword || !form.confirmPassword) {
+      Swal.fire({ icon: "error", title: "Missing fields", text: "Please fill in all fields." });
+      return;
+    }
+    if (form.newPassword !== form.confirmPassword) {
+      Swal.fire({ icon: "error", title: "Passwords don't match", text: "Please re-enter the same password." });
+      return;
+    }
+    if (form.newPassword.length < 6) {
+      Swal.fire({ icon: "warning", title: "Password too short", text: "Use at least 6 characters." });
+      return;
+    }
+
     try {
       setLoading(true);
-      const res = await fetch("http://localhost:8000/login/", {
+      const res = await fetch("http://localhost:8000/forgotpassword/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ username: form.username, newPassword: form.newPassword }),
       });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.detail || "Login failed");
+      if (!res.ok) throw new Error(result.detail || "Password reset failed");
 
-        // ✅ update store BEFORE redirect
-        useBearStore.getState().setAuth({
-            user: { username: result.username ?? form.username },
-            token: result.token ?? null,
-        });
-
-        // SweetAlert + 3s delay then go to dashboard
-        Swal.fire({
-            title: "Success!",
-            text: "Login successful! Redirecting...",
-            icon: "success",
-            timer: 3000,
-            showConfirmButton: false,
-            willClose: () => {
-                router.push("/mainpage"); // or /dashboard
-            },
-        });
-
+      await Swal.fire({
+        icon: "success",
+        title: "Password changed",
+        text: "Your password has been updated. Please log in.",
+        timer: 2000,
+        showConfirmButton: false,
+      });
+      router.push("/login");
     } catch (err) {
-      Swal.fire({ title: "Error", text: err.message, icon: "error" });
+      Swal.fire({ icon: "error", title: "Error", text: err.message });
     } finally {
       setLoading(false);
     }
@@ -63,7 +72,7 @@ export default function Login() {
     <Box
       sx={{
         minHeight: "100vh",
-        bgcolor: "#2f2f2f", // dark background around the card
+        bgcolor: "#2f2f2f",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -81,7 +90,7 @@ export default function Login() {
         }}
       >
         <Grid container>
-          {/* LEFT ORANGE PANEL */}
+          {/* LEFT ORANGE PANEL (same as login) */}
           <Grid item xs={12} md={5}>
             <Box
               sx={{
@@ -97,30 +106,20 @@ export default function Login() {
             >
               <Box>
                 <Typography
-                  sx={{
-                    fontSize: { xs: 22, md: 28 },
-                    fontWeight: 700,
-                    color: "#111",
-                  }}
+                  sx={{ fontSize: { xs: 22, md: 28 }, fontWeight: 700, color: "#111" }}
                 >
                   Welcome To
                 </Typography>
                 <Typography
-                  sx={{
-                    fontSize: { xs: 28, md: 34 },
-                    fontWeight: 800,
-                    color: "#111",
-                    lineHeight: 1.1,
-                  }}
+                  sx={{ fontSize: { xs: 28, md: 34 }, fontWeight: 800, color: "#111", lineHeight: 1.1 }}
                 >
                   BidKomKom
                 </Typography>
               </Box>
 
-              {/* Car image placeholder — replace src with your asset */}
               <Box
                 component="img"
-                src="/car.png" // put a car image in /public/car.png
+                src="/car.png"
                 alt="car"
                 sx={{
                   width: "100%",
@@ -128,31 +127,21 @@ export default function Login() {
                   objectFit: "contain",
                   filter: "drop-shadow(0px 4px 8px rgba(0,0,0,0.2))",
                 }}
-                onError={(e) => {
-                  // simple fallback if image not found
-                  e.currentTarget.style.display = "none";
-                }}
+                onError={(e) => (e.currentTarget.style.display = "none")}
               />
             </Box>
           </Grid>
 
-          {/* RIGHT LOGIN AREA */}
+          {/* RIGHT RESET AREA */}
           <Grid item xs={12} md={7} sx={{ display: "flex", alignItems: "center" }}>
             <Box
               component="form"
               onSubmit={handleSubmit}
-              sx={{
-                width: "100%",
-                px: { xs: 2.5, md: 6 },
-                py: { xs: 3, md: 6 },
-              }}
+              sx={{ width: "100%", px: { xs: 2.5, md: 6 }, py: { xs: 3, md: 6 } }}
             >
-              {/* LOGIN title with orange underline */}
               <Box sx={{ mb: 3 }}>
-                <Typography
-                  sx={{ fontSize: 36, fontWeight: 800, letterSpacing: 4 }}
-                >
-                  LOGIN
+                <Typography sx={{ fontSize: 36, fontWeight: 800, letterSpacing: 4 }}>
+                  RESET PASSWORD
                 </Typography>
                 <Box sx={{ width: 48, height: 6, bgcolor: "#ff9702", mt: 0.5 }} />
               </Box>
@@ -166,39 +155,40 @@ export default function Login() {
                   required
                   fullWidth
                   variant="outlined"
-                  InputProps={{
-                    sx: {
-                      bgcolor: "#e6e6e6",
-                      borderRadius: 1,
-                    },
-                  }}
+                  InputProps={{ sx: { bgcolor: "#e6e6e6", borderRadius: 1 } }}
                 />
                 <TextField
-                  label="Password"
-                  name="password"
+                  label="New Password"
+                  name="newPassword"
                   type="password"
-                  value={form.password}
+                  value={form.newPassword}
                   onChange={handleChange}
                   required
                   fullWidth
                   variant="outlined"
-                  InputProps={{
-                    sx: {
-                      bgcolor: "#e6e6e6",
-                      borderRadius: 1,
-                    },
-                  }}
+                  InputProps={{ sx: { bgcolor: "#e6e6e6", borderRadius: 1 } }}
                 />
-
-                <Box sx={{ textAlign: "right", mt: -1 }}>
-                  <MUILink
-                    href="/forgotpassword"
-                    underline="hover"
-                    sx={{ fontSize: 12, color: "#111" }}
-                  >
-                    forgot password?
-                  </MUILink>
-                </Box>
+                <TextField
+                  label="Confirm New Password"
+                  name="confirmPassword"
+                  type="password"
+                  value={form.confirmPassword}
+                  onChange={handleChange}
+                  required
+                  fullWidth
+                  variant="outlined"
+                  error={
+                    Boolean(form.confirmPassword) &&
+                    form.newPassword !== form.confirmPassword
+                  }
+                  helperText={
+                    Boolean(form.confirmPassword) &&
+                    form.newPassword !== form.confirmPassword
+                      ? "Passwords do not match"
+                      : " "
+                  }
+                  InputProps={{ sx: { bgcolor: "#e6e6e6", borderRadius: 1 } }}
+                />
 
                 <Button
                   type="submit"
@@ -213,16 +203,17 @@ export default function Login() {
                     "&:hover": { bgcolor: "#ff9702" },
                   }}
                 >
-                  {loading ? "Logging in..." : "Login"}
+                  {loading ? "Updating..." : "Change Password"}
                 </Button>
 
                 <Box sx={{ textAlign: "center", mt: 0.5 }}>
                   <MUILink
-                    href="/register"
+                    component={NextLink}
+                    href="/login"
                     underline="hover"
                     sx={{ fontSize: 12, color: "#111" }}
                   >
-                    Don&apos;t have an account?
+                    Back to Login
                   </MUILink>
                 </Box>
               </Stack>

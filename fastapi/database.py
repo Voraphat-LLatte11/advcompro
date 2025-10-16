@@ -1,4 +1,5 @@
 from databases import Database
+import asyncio
 
 POSTGRES_USER = "temp"
 POSTGRES_PASSWORD = "temp"
@@ -9,9 +10,20 @@ DATABASE_URL = f'postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTG
 
 database = Database(DATABASE_URL)
 
-async def connect_db():
-    await database.connect()
-    print("Database connected")
+async def connect_db(retries: int = 20, delay: float = 0.5):
+    """Connect with retry/backoff so API survives DB restarts."""
+    attempt = 0
+    while True:
+        try:
+            await database.connect()
+            return
+        except Exception:
+            attempt += 1
+            if attempt >= retries:
+                raise
+            await asyncio.sleep(delay)
+            # small exponential backoff
+            delay = min(delay * 1.5, 5.0)
 
 async def disconnect_db():
     await database.disconnect()

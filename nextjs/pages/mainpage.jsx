@@ -7,18 +7,17 @@ import {
   MenuItem,
   Grid,
   Card,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import Swal from "sweetalert2";
+import useBearStore from "@/store/useBearStore";
 
+// ---------- Static options for the filters ----------
 const OPTIONS = {
   Car: {
+    
     Toyota: ["Yaris", "Vios", "Corolla"],
     Honda: ["City", "Civic", "Jazz"],
     Mazda: ["2", "3", "CX-3"],
@@ -31,17 +30,24 @@ const OPTIONS = {
 };
 
 export default function MainPage() {
+  const [resetVersion, setResetVersion] = useState(0);
   const router = useRouter();
-
-  const [carType, setCarType] = useState("Car");
-  const [brand, setBrand] = useState("Toyota");
-  const [model, setModel] = useState(OPTIONS.Car.Toyota[0]);
-  const [startDate, setStartDate] = useState("");
+  const { isAuthed, _hasHydrated } = useBearStore();
+  
+  // ---------- Filter state ----------
+  const [carType, setCarType] = useState("");
+  const [brand, setBrand] = useState("");
+  const [model, setModel] = useState("")
+  const [startDate, setStartDate] = useState(""); // YYYY-MM-DD
   const [endDate, setEndDate] = useState("");
+
+  // ---------- Data / UI state ----------
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [filtersReady, setFiltersReady] = useState(false); // set true after URL hydration
 
-  // Columns for DataGrid
+  // ---------- Columns ----------
   const columns = useMemo(
     () => [
       { field: "type_of_car", headerName: "Type", flex: 1, minWidth: 120 },
@@ -53,64 +59,145 @@ export default function MainPage() {
     []
   );
 
-  // sync brand/model defaults when car type changes
+  // ---------- Derived lists ----------
+  const brandList =
+    carType && OPTIONS[carType] ? Object.keys(OPTIONS[carType]) : [];
+  const modelList =
+   carType && brand && OPTIONS[carType]?.[brand]
+      ? OPTIONS[carType][brand]
+      : [];
+
   useEffect(() => {
-    const brands = Object.keys(OPTIONS[carType]);
-    const firstBrand = brands[0];
-    setBrand(firstBrand);
-    setModel(OPTIONS[carType][firstBrand][0]);
+    if (!carType || !OPTIONS[carType]) {
+      setBrand("");
+      setModel("");
+    }
   }, [carType]);
 
-  // sync model when brand changes
   useEffect(() => {
-    const firstModel = OPTIONS[carType][brand]?.[0] ?? "";
-    setModel(firstModel);
-  }, [brand, carType]);
-
-  // initial fetch: all vehicles
-  useEffect(() => {
-    fetchVehicles();
-  }, []);
-
-  const fetchVehicles = async (clearAll = false) => {
-    setLoading(true);
-    try {
-      let url = "http://localhost:8000/vehicles";
-      if (!clearAll) {
-        const params = new URLSearchParams();
-        if (carType) params.append("type_of_car", carType);
-        if (brand) params.append("brand", brand);
-        if (model) params.append("model", model);
-        if (startDate) params.append("from_date", startDate);
-        if (endDate) params.append("to_date", endDate);
-        if (params.toString()) url += `?${params.toString()}`;
-      }
-
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to load vehicles");
-      setRows(data);
-    } catch (e) {
-      console.error(e);
-      setRows([]);
-      alert(e.message);
-    } finally {
-      setLoading(false);
+    if (!brand || !OPTIONS[carType]?.[brand]) {
+      setModel("");
     }
-  };
+  }, [brand, carType]);
+  
+  // ---------- Hydrate filters from URL once ----------
+  useEffect(() => {
+    if (!router.isReady) return;
 
+    const { type, brand: qBrand, model: qModel, from, to } = router.query;
+
+    // type: only set if valid; don't auto-pick brand/model
+    if (type && OPTIONS[type]) {
+      setCarType(type);
+    } else {
+      setCarType("");
+    }
+
+    // brand: only set if provided AND valid under the chosen type
+    if (type && OPTIONS[type] && qBrand && OPTIONS[type][qBrand]) {
+      setBrand(qBrand);
+    } else {
+      setBrand("");
+    }
+
+    // model: only set if provided AND valid under chosen type+brand
+    if (
+      type && OPTIONS[type] &&
+      qBrand && OPTIONS[type][qBrand] &&
+      qModel && OPTIONS[type][qBrand].includes(qModel)
+    ) {
+      setModel(qModel);
+    } else {
+      setModel("");
+    }
+
+    setStartDate(from ? String(from) : "");
+    setEndDate(to ? String(to) : "");
+
+    setFiltersReady(true);
+  }, [router.isReady]);
+
+
+  // ---------- Fetch vehicles ----------
+  const fetchVehicles = async (clearAll = false, attempt = 1) => {
+  setLoading(true);
+  try {
+    let url = "http://localhost:8000/vehicles";
+
+    if (!clearAll) {
+      const params = new URLSearchParams();
+      if (carType) params.append("type_of_car", carType);
+      if (brand) params.append("brand", brand);
+      if (model) params.append("model", model);
+      if (startDate) params.append("from_date", startDate);
+      if (endDate) params.append("to_date", endDate);
+      const q = params.toString();
+      if (q) url += `?${q}`;
+    }
+
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    setRows(data);
+  } catch (e) {
+    if (attempt === 1) {
+      // Retry once after short delay (DB might have just restarted)
+      setTimeout(() => fetchVehicles(clearAll, 2), 600);
+    } else {
+      setRows([]);
+      Swal.fire({
+        icon: "error",
+        title: "Server unavailable",
+        text: e.message,
+      });
+    }
+  } finally {
+    setLoading(false);
+  }
+};
+
+  // ---------- Initial fetch after filters are hydrated ----------
+  useEffect(() => {
+    if (!filtersReady) return;
+    fetchVehicles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersReady]);
+
+  // ---------- Handlers ----------
   const clearFilters = () => {
-  setCarType("Car");
-  setBrand("Toyota");
-  setModel(OPTIONS.Car.Toyota[0]);
-  setStartDate("");
-  setEndDate("");
-  fetchVehicles(true); // reload full list with no filters
+    setCarType("");
+    setBrand("");
+    setModel("");
+    setStartDate("");
+    setEndDate("");
+    setSelectedIds([]);
+    setResetVersion(v => v + 1);
+
+    router.replace("/mainpage", undefined, { shallow: true });
+
+    // give UI time to reset first
+    setTimeout(() => fetchVehicles(true), 150);
   };
 
 
-  const brandList = Object.keys(OPTIONS[carType] || {});
-  const modelList = (OPTIONS[carType]?.[brand]) || [];
+
+  const goToAdd = () => {
+    router.push("/vehicleadd");
+  };
+
+  const goToDelete = () => {
+    if (!selectedIds.length) return;
+    // single or multi:
+    const path =
+      selectedIds.length === 1
+        ? `/vehicledel?id=${encodeURIComponent(selectedIds[0])}`
+        : `/vehicledel?ids=${selectedIds.map((id) => encodeURIComponent(id)).join(",")}`;
+    router.push(path);
+  };
 
   return (
     <Box
@@ -162,12 +249,17 @@ export default function MainPage() {
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6} md={3}>
             <TextField
+              key={`type-${resetVersion}`}
               select
               label="Car Type"
-              value={carType}
+              value={carType || ""}
               onChange={(e) => setCarType(e.target.value)}
               fullWidth
+              SelectProps={{ displayEmpty: true }}
             >
+              <MenuItem value="">
+                <em></em>
+              </MenuItem>
               {Object.keys(OPTIONS).map((t) => (
                 <MenuItem key={t} value={t}>
                   {t}
@@ -178,13 +270,19 @@ export default function MainPage() {
 
           <Grid item xs={12} sm={6} md={3}>
             <TextField
+              key={`brand-${resetVersion}`}  
               select
               label="Brand"
-              value={brand}
+              value={brand || ""}
               onChange={(e) => setBrand(e.target.value)}
               fullWidth
+              disabled={!carType}
+              SelectProps={{ displayEmpty: true }}
             >
-              {brandList.map((b) => (
+              <MenuItem value="">
+                <em></em>
+              </MenuItem>
+              {(brandList || []).map((b) => (
                 <MenuItem key={b} value={b}>
                   {b}
                 </MenuItem>
@@ -194,13 +292,19 @@ export default function MainPage() {
 
           <Grid item xs={12} sm={6} md={3}>
             <TextField
+              key={`model-${resetVersion}`}    
               select
               label="Model"
-              value={model}
+              value={model || ""}
               onChange={(e) => setModel(e.target.value)}
               fullWidth
+              disabled={!carType || !brand}
+              SelectProps={{ displayEmpty: true }}
             >
-              {modelList.map((m) => (
+              <MenuItem value="">
+                <em></em>
+              </MenuItem>
+              {(modelList || []).map((m) => (
                 <MenuItem key={m} value={m}>
                   {m}
                 </MenuItem>
@@ -230,14 +334,7 @@ export default function MainPage() {
             />
           </Grid>
 
-          <Grid
-            item
-            xs={12}
-            display="flex"
-            gap={2}
-            justifyContent="center"
-            mt={1}
-          >
+          <Grid item xs={12} display="flex" gap={2} justifyContent="center" mt={1}>
             <Button
               variant="contained"
               onClick={() => fetchVehicles()}
@@ -255,7 +352,8 @@ export default function MainPage() {
             <Button
               variant="outlined"
               onClick={clearFilters}
-              sx={{ color: "#000", borderColor: "#000" }}
+              disabled={loading}
+              sx={{ backgroundColor: "#ffffffff", color: "#000", borderColor: "#000" }}
             >
               Clear
             </Button>
@@ -263,7 +361,7 @@ export default function MainPage() {
         </Grid>
       </Card>
 
-      {/* Vehicle list */}
+      {/* Actions + Vehicle list */}
       <Card
         sx={{
           position: "relative",
@@ -276,18 +374,47 @@ export default function MainPage() {
           boxShadow: "0px 6px 14px rgba(0,0,0,0.15)",
         }}
       >
+        {/* Action bar — only after login */}
+        {_hasHydrated && isAuthed && (
+          <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mb: 1 }}>
+            <Button
+              variant="contained"
+              onClick={goToAdd}
+              sx={{
+                backgroundColor: "#ff9702",
+                color: "#000",
+                fontWeight: 700,
+                "&:hover": { backgroundColor: "#ffa733" },
+              }}
+            >
+              Add
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={goToDelete}
+              disabled={!selectedIds.length}
+              sx={{ color: "#000", borderColor: "#000" }}
+            >
+              Delete
+            </Button>
+          </Box>
+        )}
+
         <div style={{ height: 420, width: "100%" }}>
           <DataGrid
             rows={rows}
             columns={columns}
+            getRowId={(row) => row.id} // ensure DataGrid uses 'id'
             loading={loading}
+            checkboxSelection
             disableRowSelectionOnClick
+            onRowSelectionModelChange={(ids) => setSelectedIds(ids)}
+            rowSelectionModel={selectedIds}
             sortingOrder={["asc", "desc"]}
             initialState={{
               sorting: { sortModel: [{ field: "type_of_car", sort: "asc" }] },
             }}
-            onRowClick={(params) => {
-              // 👇 navigate to details page with vehicle id
+            onRowDoubleClick={(params) => {
               router.push(`/vehicle/${params.row.id}`);
             }}
           />
