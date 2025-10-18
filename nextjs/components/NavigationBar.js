@@ -28,40 +28,6 @@ const NavigationLayout = ({ children }) => {
   const loadingAuth = !_hasHydrated;
 
   // ---- Add 100 coins (Beta) ----
-  const handleAddCoinsBeta = async () => {
-    if (!user?.username) return;
-    setCoinBusy(true);
-    try {
-      const res = await fetch(`${API_BASE}/coins/add`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: user.username,
-          amount: 100,
-          reason: "topup",
-          reference_type: "beta",
-          reference_id: "nav-beta-quick-add",
-          metadata: { source: "navbar", note: "beta quick topup" },
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.detail || "Failed to add coins");
-      }
-
-      // Optionally update your store here if you track coin balance
-      // useBearStore.getState().setCoins?.(data.coin_balance);
-
-      alert(`Added 100 coins!\nNew balance: ${data.coin_balance}`);
-    } catch (err) {
-      console.error(err);
-      alert(`Could not add coins: ${String(err.message || err)}`);
-    } finally {
-      setCoinBusy(false);
-      setAnchorEl(null);
-    }
-  };
 
   return (
     <>
@@ -131,19 +97,36 @@ const NavigationLayout = ({ children }) => {
           {/* AFTER LOGIN */}
           {showLoggedIn && (
             <>
-              <Button
-                variant="outlined"
-                sx={{ color: "#fff", borderColor: "rgba(255,255,255,0.6)", mr: 1 }}
-                onClick={() => router.push("/mainpage")}
+              <Box
+                onClick={(e) => setAnchorEl(e.currentTarget)}
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  px: 1,
+                  py: 0.5,
+                  borderRadius: 2,
+                  cursor: "pointer",
+                  "&:hover": { backgroundColor: "rgba(255,255,255,0.08)" },
+                }}
+                aria-controls={open ? "user-menu" : undefined}
+                aria-haspopup="true"
+                aria-expanded={open ? "true" : undefined}
               >
-                Dashboard
-              </Button>
-              <IconButton onClick={(e) => setAnchorEl(e.currentTarget)}>
                 <Avatar sx={{ width: 34, height: 34 }}>
                   {(user?.username?.[0] ?? "U").toUpperCase()}
                 </Avatar>
-              </IconButton>
+                <Typography
+                  variant="body2"
+                  sx={{ color: "#fff", fontWeight: 600, maxWidth: 160 }}
+                  noWrap
+                >
+                  {user?.username ?? "User"}
+                </Typography>
+              </Box>
+
               <Menu
+                id="user-menu"
                 anchorEl={anchorEl}
                 open={open}
                 onClose={() => setAnchorEl(null)}
@@ -159,7 +142,6 @@ const NavigationLayout = ({ children }) => {
 
                 <Divider />
 
-                {/* Profile page */}
                 <MenuItem
                   onClick={() => {
                     setAnchorEl(null);
@@ -172,23 +154,10 @@ const NavigationLayout = ({ children }) => {
                   Profile
                 </MenuItem>
 
-                {/* Add 100 coins {Beta} */}
-                <MenuItem
-                  disabled={coinBusy}
-                  onClick={handleAddCoinsBeta}
-                >
-                  <ListItemIcon>
-                    <PaidIcon fontSize="small" />
-                  </ListItemIcon>
-                  {coinBusy ? "Adding coins..." : "Add 100 coins {Beta}"}
-                </MenuItem>
-
-                <Divider />
-
                 <MenuItem
                   onClick={() => {
                     setAnchorEl(null);
-                    router.push("/mainpage");
+                    router.push("/dashboard");
                   }}
                 >
                   <ListItemIcon>

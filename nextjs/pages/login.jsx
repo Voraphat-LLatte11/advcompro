@@ -196,7 +196,7 @@ export default function Login() {
                     underline="hover"
                     sx={{ fontSize: 12, color: "#111" }}
                   >
-                    forgot password?
+                    forgot password or want to change a password?
                   </MUILink>
                 </Box>
 

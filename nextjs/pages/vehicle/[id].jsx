@@ -1,5 +1,6 @@
+// pages/[id].jsx
 import { useRouter } from "next/router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Typography,
@@ -13,6 +14,16 @@ import {
 import Swal from "sweetalert2";
 import useBearStore from "@/store/useBearStore";
 
+const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || `http://${host}:8000`;
+
+// Ensure image paths work from Next.js /public folder
+const publicImg = (p, fallback) => {
+  if (!p) return fallback;                       // no value -> fallback
+  if (/^https?:\/\//i.test(p)) return p;         // absolute URL -> keep
+  return p.startsWith("/") ? p : `/${p}`;        // add leading slash if missing
+};
+
 export default function VehicleBooking() {
   const router = useRouter();
   const { id } = router.query;
@@ -20,62 +31,88 @@ export default function VehicleBooking() {
 
   const [vehicle, setVehicle] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // booking dates
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+
+  // coins
   const [userCoins, setUserCoins] = useState(0);
   const [coinsNeeded, setCoinsNeeded] = useState(0);
   const [remainingCoins, setRemainingCoins] = useState(0);
+
   const [confirming, setConfirming] = useState(false);
 
   // --- Fetch vehicle details ---
   useEffect(() => {
     if (!id) return;
-    const fetchVehicle = async () => {
+    (async () => {
       try {
-        const res = await fetch(`http://localhost:8000/vehicles/${id}`);
+        const res = await fetch(`${API_BASE}/vehicles/${id}`);
+        if (!res.ok) throw new Error(`Failed to load vehicle ${id}`);
         const data = await res.json();
         setVehicle(data);
+
+        // Prefill earliest available date
+        const start = data?.rent_start_date?.slice(0, 10) || "";
+        if (start) {
+          setFromDate(start);
+          setToDate(start);
+        }
       } catch (err) {
         console.error("Vehicle fetch error:", err);
       } finally {
         setLoading(false);
       }
-    };
-    fetchVehicle();
+    })();
   }, [id]);
 
   // --- Fetch user's coin balance ---
   useEffect(() => {
     if (!user?.username) return;
-    const fetchBalance = async () => {
-      try {
-        const res = await fetch(
-          `http://localhost:8000/coins/balance?username=${user.username}`
-        );
-        if (!res.ok) throw new Error("Failed to fetch balance");
-        const data = await res.json();
-        setUserCoins(data.coin_balance);
-        setRemainingCoins(data.coin_balance);
-      } catch (err) {
-        console.error("Balance fetch error:", err);
-      }
-    };
-    fetchBalance();
+    refreshBalance(user.username);
   }, [user?.username]);
 
-  // --- Calculate coins needed when date changes ---
-  useEffect(() => {
-    if (fromDate && toDate) {
-      const start = new Date(fromDate);
-      const end = new Date(toDate);
-      if (end < start) return;
+  const dayRate = useMemo(
+    () => (vehicle?.coin_rate_per_day ?? vehicle?.daily_coin_rate ?? 100),
+    [vehicle]
+  );
 
-      const days = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
-      const needed = days * 100; // example rate: 100 coins/day
-      setCoinsNeeded(needed);
-      setRemainingCoins(Math.max(0, userCoins - needed));
+  // --- Calculate coins needed when date changes or rate/balance changes ---
+  useEffect(() => {
+    if (!fromDate) {
+      setCoinsNeeded(0);
+      setRemainingCoins(userCoins);
+      return;
     }
-  }, [fromDate, toDate, userCoins]);
+
+    const start = new Date(fromDate);
+    const end = new Date(toDate || fromDate);
+
+    if (isNaN(start) || isNaN(end) || end < start) {
+      setCoinsNeeded(0);
+      setRemainingCoins(userCoins);
+      return;
+    }
+
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const rawDays = Math.ceil((end - start) / msPerDay) || 0;
+    const days = Math.max(1, rawDays + 1 - 1);
+    const needed = days * dayRate;
+
+    setCoinsNeeded(needed);
+    setRemainingCoins(Math.max(0, userCoins - needed));
+  }, [fromDate, toDate, userCoins, dayRate]);
+
+  const refreshBalance = async (username) => {
+    try {
+      const r = await fetch(`${API_BASE}/coins/balance?username=${encodeURIComponent(username)}`);
+      if (!r.ok) return;
+      const b = await r.json();
+      setUserCoins(b.coin_balance ?? 0);
+      setRemainingCoins(Math.max(0, (b.coin_balance ?? 0) - coinsNeeded));
+    } catch (_) {}
+  };
 
   // --- Top-up coins manually ---
   const handleTopUp = async () => {
@@ -108,11 +145,8 @@ export default function VehicleBooking() {
         confirmButtonColor: "#ff9702",
       });
 
-      // ✅ Now update local balance here (inside the same try block)
-      setUserCoins(data.coin_balance);
-      setRemainingCoins(Math.max(0, data.coin_balance - coinsNeeded));
-
-      // ✅ And sync to authoritative server balance
+      setUserCoins(data.coin_balance ?? 0);
+      setRemainingCoins(Math.max(0, (data.coin_balance ?? 0) - coinsNeeded));
       await refreshBalance(user.username);
     } catch (err) {
       console.error(err);
@@ -120,120 +154,70 @@ export default function VehicleBooking() {
     }
   };
 
-
   // --- Booking process ---
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
-
-  const refreshBalance = async (username) => {
-    try {
-      const r = await fetch(`${API_BASE}/coins/balance?username=${username}`);
-      if (!r.ok) return;
-      const b = await r.json();
-      setUserCoins(b.coin_balance);
-      setRemainingCoins(Math.max(0, b.coin_balance - coinsNeeded));
-    } catch (_) {}
-  };
-
-  const safePost = async (url, body) => {
-    // Small helper that returns { ok, status, data } or throws on network errors
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    let data = {};
-    try { data = await res.json(); } catch (_) {}
-    return { ok: res.ok, status: res.status, data };
-  };
-
   const handleBooking = async () => {
     if (!user?.username) {
-      Swal.fire("Not logged in", "Please login first.", "warning");
+      Swal.fire("Error", "Please log in first", "error");
       return;
     }
-    if (!fromDate || !toDate) {
-      Swal.fire("Select Dates", "Please choose rental dates first.", "warning");
+    if (!fromDate) {
+      Swal.fire("Error", "Please choose a start date.", "error");
       return;
     }
-    const start = new Date(fromDate), end = new Date(toDate);
-    if (end < start) {
-      Swal.fire("Invalid dates", "End date must be after start date.", "warning");
+    if (coinsNeeded <= 0) {
+      Swal.fire("Error", "Please select valid rental dates.", "error");
       return;
     }
-    if (coinsNeeded > userCoins) {
-      Swal.fire("Not Enough Coins", "Please top up your balance.", "error");
+    if (userCoins < coinsNeeded) {
+      Swal.fire(
+        "Insufficient coins",
+        `You need ${coinsNeeded} coins but only have ${userCoins}.`,
+        "error"
+      );
       return;
     }
-    if (confirming) return;
+
+    const start_date = fromDate;
+    const end_date = toDate || fromDate;
+
+    const minDate = vehicle?.rent_start_date?.slice(0, 10);
+    const maxDate = vehicle?.rent_end_date?.slice(0, 10);
+    if (minDate && start_date < minDate) {
+      Swal.fire("Error", `Start date must be on/after ${minDate}`, "error");
+      return;
+    }
+    if (maxDate && end_date > maxDate) {
+      Swal.fire("Error", `End date must be on/before ${maxDate}`, "error");
+      return;
+    }
+
     setConfirming(true);
-
-    const spendBody = {
-      username: user.username,
-      amount: coinsNeeded,
-      reason: "booking",
-      reference_type: "vehicle",
-      reference_id: `VEH-${id}`,
-      metadata: { vehicle_id: id, fromDate, toDate },
-    };
-
     try {
-      // 1) Spend coins
-      const spend = await safePost(`${API_BASE}/coins/spend`, spendBody);
-      if (!spend.ok) {
-        throw new Error(spend.data?.detail || `Coin spend failed (HTTP ${spend.status})`);
-      }
-
-      // ✅ Optimistically update local balance immediately
-      const spentBalance = spend.data?.coin_balance ?? (userCoins - coinsNeeded);
-      setUserCoins(spentBalance);
-      setRemainingCoins(Math.max(0, spentBalance - coinsNeeded));
-
-      // 2) Create booking (query params; many backends expect that)
-      const params = new URLSearchParams({
-        vehicle_id: String(id),
-        start_date: fromDate,
-        end_date: toDate,
-      });
-
-      let bookingOk = false, bookingErr = null;
-      try {
-        const bookRes = await fetch(`${API_BASE}/bookings?${params.toString()}`, { method: "POST" });
-        if (!bookRes.ok) {
-          const detail = await bookRes.json().then(j => j.detail).catch(() => "");
-          bookingErr = new Error(detail || `Booking failed (HTTP ${bookRes.status})`);
-        } else {
-          bookingOk = true;
-        }
-      } catch (e) {
-        // 🔥 This is where browsers throw "Failed to fetch" (CORS/offline)
-        bookingErr = new Error("Booking network error: Failed to fetch");
-      }
-
-      if (!bookingOk) {
-        // 3) Refund (best-effort), then refresh balance from server
-        await safePost(`${API_BASE}/coins/add`, {
+      const res = await fetch(`${API_BASE}/bookings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vehicle_id: vehicle.id,
           username: user.username,
-          amount: coinsNeeded,
-          reason: "refund",
-          reference_type: "booking",
-          reference_id: `REFUND-VEH-${id}-${Date.now()}`,
-          metadata: { vehicle_id: id, fromDate, toDate, cause: "booking_failed_or_network" },
-        });
-        await refreshBalance(user.username);
-        throw bookingErr; // surface error to UI
+          start_date,
+          end_date,
+          coins_used: coinsNeeded,
+          coin_rate_per_day: dayRate,
+        }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.detail || `Booking failed (${res.status})`);
       }
 
-      // 4) Success
-      Swal.fire({
-        title: "Booking Confirmed!",
-        text: `You have booked ${vehicle.brand} ${vehicle.model}.`,
-        icon: "success",
-        confirmButtonColor: "#ff9702",
-      });
+      await refreshBalance(user.username);
+      sessionStorage.setItem("justBookedVehicleId", String(vehicle.id));
+
+      await Swal.fire("Success", "Booking created successfully!", "success");
       router.push("/mainpage");
-    } catch (err) {
-      console.error(err);
-      Swal.fire("Error", String(err.message || err), "error");
+    } catch (e) {
+      Swal.fire("Error", e.message, "error");
     } finally {
       setConfirming(false);
     }
@@ -266,9 +250,12 @@ export default function VehicleBooking() {
       </Box>
     );
 
-  // Min & Max rental limits
   const minDate = vehicle.rent_start_date ? vehicle.rent_start_date.slice(0, 10) : "";
   const maxDate = vehicle.rent_end_date ? vehicle.rent_end_date.slice(0, 10) : "";
+  const img = publicImg(
+    vehicle?.image_url,
+    vehicle?.type_of_car === "Motorcycle" ? "/vehicle2.jpg" : "/vehicle1.jpg"
+  );
 
   return (
     <Box
@@ -294,12 +281,18 @@ export default function VehicleBooking() {
           <Grid item xs={12} md={5}>
             <Box
               component="img"
-              src={vehicle.image_url || "/yamaha-fazzio.jpg"}
-              alt={vehicle.model}
+              src={img}
+              alt={`${vehicle.brand} ${vehicle.model}`}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src =
+                  vehicle?.type_of_car === "Motorcycle" ? "/vehicle2.jpg" : "/vehicle1.jpg";
+              }}
               sx={{
                 width: "100%",
                 borderRadius: 3,
                 boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                objectFit: "cover",
               }}
             />
           </Grid>
@@ -309,17 +302,39 @@ export default function VehicleBooking() {
             <Typography variant="h4" sx={{ fontWeight: 800, mb: 1, color: "#000" }}>
               {vehicle.brand} {vehicle.model} {vehicle.year || ""}
             </Typography>
+            <Typography variant="subtitle2" sx={{ color: "#666", mb: 2 }}>
+              Vehicle ID: {vehicle.id}
+              {vehicle.license_plate ? ` • Plate: ${vehicle.license_plate}` : ""}
+            </Typography>
+
             <Divider sx={{ mb: 2 }} />
 
             <Typography sx={{ mb: 1 }}>
-              <b>Fuel Consumption:</b> {vehicle.fuel_consumption || "55–65 km/L"}
+              <b>Fuel Consumption:</b> {vehicle.fuel_consumption || "—"}
             </Typography>
             <Typography sx={{ mb: 1 }}>
-              <b>Max Speed:</b> {vehicle.max_speed || "110 km/h"}
+              <b>Max Speed:</b> {vehicle.max_speed || "—"}
             </Typography>
             <Typography sx={{ mb: 1 }}>
-              <b>Capacity:</b> {vehicle.capacity || "2 people (including driver)"}
+              <b>Capacity:</b> {vehicle.capacity || "—"}
             </Typography>
+            {vehicle.location && (
+              <Typography sx={{ mb: 1 }}>
+                <b>Location:</b> {vehicle.location}
+              </Typography>
+            )}
+            {vehicle.description && (
+              <Typography sx={{ mb: 2, color: "#444" }}>{vehicle.description}</Typography>
+            )}
+
+            <Typography sx={{ mt: 1, fontWeight: 700 }}>
+              Price: {dayRate} coins / day
+            </Typography>
+            {minDate && maxDate && (
+              <Typography variant="body2" sx={{ color: "#666" }}>
+                Available: {minDate} → {maxDate}
+              </Typography>
+            )}
 
             <Grid container spacing={2} sx={{ mt: 2 }}>
               <Grid item xs={12} sm={6}>
@@ -329,7 +344,11 @@ export default function VehicleBooking() {
                   type="date"
                   value={fromDate}
                   inputProps={{ min: minDate, max: maxDate }}
-                  onChange={(e) => setFromDate(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setFromDate(v);
+                    if (toDate && toDate < v) setToDate(v);
+                  }}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -338,7 +357,7 @@ export default function VehicleBooking() {
                   fullWidth
                   type="date"
                   value={toDate}
-                  inputProps={{ min: minDate, max: maxDate }}
+                  inputProps={{ min: fromDate || minDate, max: maxDate }}
                   onChange={(e) => setToDate(e.target.value)}
                 />
               </Grid>
@@ -385,10 +404,7 @@ export default function VehicleBooking() {
               >
                 {confirming ? "Processing..." : "Pay With Coin"}
               </Button>
-              <Typography
-                variant="body2"
-                sx={{ mt: 1, fontStyle: "italic", color: "#555" }}
-              >
+              <Typography variant="body2" sx={{ mt: 1, fontStyle: "italic", color: "#555" }}>
                 *Other payment methods are unavailable now
               </Typography>
             </Grid>

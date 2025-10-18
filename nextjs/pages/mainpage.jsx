@@ -14,10 +14,12 @@ import { useRouter } from "next/router";
 import Swal from "sweetalert2";
 import useBearStore from "@/store/useBearStore";
 
+const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || `http://${host}:8000`;
+
 // ---------- Static options for the filters ----------
 const OPTIONS = {
   Car: {
-    
     Toyota: ["Yaris", "Vios", "Corolla"],
     Honda: ["City", "Civic", "Jazz"],
     Mazda: ["2", "3", "CX-3"],
@@ -32,12 +34,12 @@ const OPTIONS = {
 export default function MainPage() {
   const [resetVersion, setResetVersion] = useState(0);
   const router = useRouter();
-  const { isAuthed, _hasHydrated } = useBearStore();
-  
+  const { isAuthed, _hasHydrated, user } = useBearStore();
+
   // ---------- Filter state ----------
   const [carType, setCarType] = useState("");
   const [brand, setBrand] = useState("");
-  const [model, setModel] = useState("")
+  const [model, setModel] = useState("");
   const [startDate, setStartDate] = useState(""); // YYYY-MM-DD
   const [endDate, setEndDate] = useState("");
 
@@ -60,12 +62,9 @@ export default function MainPage() {
   );
 
   // ---------- Derived lists ----------
-  const brandList =
-    carType && OPTIONS[carType] ? Object.keys(OPTIONS[carType]) : [];
+  const brandList = carType && OPTIONS[carType] ? Object.keys(OPTIONS[carType]) : [];
   const modelList =
-   carType && brand && OPTIONS[carType]?.[brand]
-      ? OPTIONS[carType][brand]
-      : [];
+    carType && brand && OPTIONS[carType]?.[brand] ? OPTIONS[carType][brand] : [];
 
   useEffect(() => {
     if (!carType || !OPTIONS[carType]) {
@@ -79,32 +78,26 @@ export default function MainPage() {
       setModel("");
     }
   }, [brand, carType]);
-  
+
   // ---------- Hydrate filters from URL once ----------
   useEffect(() => {
     if (!router.isReady) return;
 
     const { type, brand: qBrand, model: qModel, from, to } = router.query;
 
-    // type: only set if valid; don't auto-pick brand/model
-    if (type && OPTIONS[type]) {
-      setCarType(type);
-    } else {
-      setCarType("");
-    }
+    if (type && OPTIONS[type]) setCarType(type);
+    else setCarType("");
 
-    // brand: only set if provided AND valid under the chosen type
-    if (type && OPTIONS[type] && qBrand && OPTIONS[type][qBrand]) {
-      setBrand(qBrand);
-    } else {
-      setBrand("");
-    }
+    if (type && OPTIONS[type] && qBrand && OPTIONS[type][qBrand]) setBrand(qBrand);
+    else setBrand("");
 
-    // model: only set if provided AND valid under chosen type+brand
     if (
-      type && OPTIONS[type] &&
-      qBrand && OPTIONS[type][qBrand] &&
-      qModel && OPTIONS[type][qBrand].includes(qModel)
+      type &&
+      OPTIONS[type] &&
+      qBrand &&
+      OPTIONS[type][qBrand] &&
+      qModel &&
+      OPTIONS[type][qBrand].includes(qModel)
     ) {
       setModel(qModel);
     } else {
@@ -117,55 +110,70 @@ export default function MainPage() {
     setFiltersReady(true);
   }, [router.isReady]);
 
-
-  // ---------- Fetch vehicles ----------
+  // ---------- Fetch vehicles (hides vehicles booked by others) ----------
   const fetchVehicles = async (clearAll = false, attempt = 1) => {
-  setLoading(true);
-  try {
-    let url = "http://localhost:8000/vehicles";
+    setLoading(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
 
-    if (!clearAll) {
+      // Build params
       const params = new URLSearchParams();
-      if (carType) params.append("type_of_car", carType);
-      if (brand) params.append("brand", brand);
-      if (model) params.append("model", model);
-      if (startDate) params.append("from_date", startDate);
-      if (endDate) params.append("to_date", endDate);
-      const q = params.toString();
-      if (q) url += `?${q}`;
-    }
 
-    const res = await fetch(url);
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `HTTP ${res.status}`);
-    }
+      // hide vehicles booked by others; keep mine visible
+      params.append("exclude_booked", "true");
+      if (user?.username) params.append("viewer_username", user.username);
 
-    const data = await res.json();
-    setRows(data);
-  } catch (e) {
-    if (attempt === 1) {
-      // Retry once after short delay (DB might have just restarted)
-      setTimeout(() => fetchVehicles(clearAll, 2), 600);
-    } else {
-      setRows([]);
-      Swal.fire({
-        icon: "error",
-        title: "Server unavailable",
-        text: e.message,
-      });
+      if (!clearAll) {
+        if (carType) params.append("type_of_car", carType);
+        if (brand) params.append("brand", brand);
+        if (model) params.append("model", model);
+        // If no explicit dates chosen, default to today..today so newly-booked vehicles vanish
+        if (startDate) params.append("from_date", startDate);
+        if (endDate)   params.append("to_date", endDate);
+      } else {
+        // clear filters but still show availability for today by default
+        params.append("from_date", today);
+        params.append("to_date", today);
+      }
+
+      let url = `${API_BASE}/vehicles?${params.toString()}`;
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} – ${text || "no body"}`);
+      }
+
+      const data = await res.json();
+      setRows(data);
+
+      // Optional optimistic removal if another page set this flag
+      const just = sessionStorage.getItem("justBookedVehicleId");
+      if (just) {
+        setRows((prev) => prev.filter((r) => String(r.id) !== String(just)));
+        sessionStorage.removeItem("justBookedVehicleId");
+      }
+    } catch (e) {
+      if (attempt === 1) {
+        setTimeout(() => fetchVehicles(clearAll, 2), 600);
+      } else {
+        setRows([]);
+        Swal.fire({
+          icon: "error",
+          title: "Server unavailable",
+          text: e.message,
+        });
+      }
+    } finally {
+      setLoading(false);
     }
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   // ---------- Initial fetch after filters are hydrated ----------
   useEffect(() => {
     if (!filtersReady) return;
     fetchVehicles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtersReady]);
+  }, [filtersReady, user?.username]); // refetch when user hydrates
 
   // ---------- Handlers ----------
   const clearFilters = () => {
@@ -175,7 +183,7 @@ export default function MainPage() {
     setStartDate("");
     setEndDate("");
     setSelectedIds([]);
-    setResetVersion(v => v + 1);
+    setResetVersion((v) => v + 1);
 
     router.replace("/mainpage", undefined, { shallow: true });
 
@@ -183,15 +191,12 @@ export default function MainPage() {
     setTimeout(() => fetchVehicles(true), 150);
   };
 
-
-
   const goToAdd = () => {
     router.push("/vehicleadd");
   };
 
   const goToDelete = () => {
     if (!selectedIds.length) return;
-    // single or multi:
     const path =
       selectedIds.length === 1
         ? `/vehicledel?id=${encodeURIComponent(selectedIds[0])}`
@@ -270,7 +275,7 @@ export default function MainPage() {
 
           <Grid item xs={12} sm={6} md={3}>
             <TextField
-              key={`brand-${resetVersion}`}  
+              key={`brand-${resetVersion}`}
               select
               label="Brand"
               value={brand || ""}
@@ -292,7 +297,7 @@ export default function MainPage() {
 
           <Grid item xs={12} sm={6} md={3}>
             <TextField
-              key={`model-${resetVersion}`}    
+              key={`model-${resetVersion}`}
               select
               label="Model"
               value={model || ""}
@@ -374,7 +379,6 @@ export default function MainPage() {
           boxShadow: "0px 6px 14px rgba(0,0,0,0.15)",
         }}
       >
-        {/* Action bar — only after login */}
         {_hasHydrated && isAuthed && (
           <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mb: 1 }}>
             <Button
@@ -404,7 +408,7 @@ export default function MainPage() {
           <DataGrid
             rows={rows}
             columns={columns}
-            getRowId={(row) => row.id} // ensure DataGrid uses 'id'
+            getRowId={(row) => row.id}
             loading={loading}
             checkboxSelection
             disableRowSelectionOnClick

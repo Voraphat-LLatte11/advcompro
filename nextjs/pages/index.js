@@ -118,9 +118,9 @@ export default function Home() {
 
         <Grid container spacing={4} justifyContent="center">
           {[
-            { img: "/bike1.jpg", text: "Easy, 100% Guaranteed" },
-            { img: "/bike2.png", text: "Easy, 100% Guaranteed" },
-            { img: "/bike3.png", text: "Easy, 100% Guaranteed" },
+            { img: "/vehicle1.png", text: "Easy, 100% Guaranteed" },
+            { img: "/vehicle2.jpg", text: "Easy, 100% Guaranteed" },
+            { img: "/vehicle3.jpg", text: "Easy, 100% Guaranteed" },
           ].map((item, i) => (
             <Grid item xs={12} sm={6} md={4} key={i}>
               <Card
